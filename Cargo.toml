@@ -1,0 +1,8 @@
+[package]
+name = "rsndfile"
+description = "libsndfile bindings for Rust (αlpha)"
+version = "0.1.0"
+authors = ["eeeeeta <eeeeeta@users.noreply.github.com>"]
+
+[dependencies]
+libc = "0.2.8"
