@@ -6,6 +6,11 @@ This is a crate to provide basic [libsndfile](http://www.mega-nerd.com/libsndfil
 for Rust. Currently, it's not very developed and is only useful for extremely basic playback.
 It works, though. Sort of.
 
+### NOTE: this crate requires nightly Rust
+
+due to use of the unstable `Unique<T>` type for `Sync` on `SndFile` objects. Sorry, stable Rust
+users - but then again, this crate is not probably what stable Rust users want.
+ 
 ### Warning: this crate may be terribly unsafe
 
 I don't think it does anything bad, but if your program blows up because you used this crappy alpha

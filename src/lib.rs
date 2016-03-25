@@ -1,16 +1,18 @@
+#![feature(unique)]
 extern crate libc;
 mod bindgen;
 use bindgen::{SF_INFO, SNDFILE, sf_count_t, sf_open, sf_readf_float, sf_close, sf_error, sf_error_number, sf_strerror, OpenMode, SfError};
 
 use std::ffi::{CString, NulError, CStr};
 use libc::{c_int, c_float};
+use std::ptr::Unique;
 
 /// Information about a sound file.
 ///
 /// Currently a raw copy of the `SF_INFO` struct - better API tbc.
 /// Check out [the libsndfile docs](http://www.mega-nerd.com/libsndfile/api.html#open)
 /// for more info on this struct.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct SndFileInfo {
     /// The number of frames in the file
     pub frames: sf_count_t,
@@ -38,14 +40,13 @@ impl From<SF_INFO> for SndFileInfo {
     }
 }
 /// A `libsndfile` sound file object.
-#[derive(Debug)]
 pub struct SndFile {
-    ptr: *mut SNDFILE,
+    ptr: Unique<SNDFILE>,
     pub info: SndFileInfo
 }
 impl Drop for SndFile {
     fn drop(&mut self) {
-        unsafe { sf_close(self.ptr) };
+        unsafe { sf_close(*self.ptr) };
     }
 }
 impl SndFile {
@@ -72,8 +73,12 @@ impl SndFile {
             Err(Self::get_error(sndfile_ptr))
         }
         else {
+            let unique: Unique<SNDFILE>;
+            unsafe {
+                unique = Unique::new(sndfile_ptr);
+            }
             Ok(SndFile {
-                ptr: sndfile_ptr,
+                ptr: unique,
                 info: SndFileInfo::from(sfi)
             })
         }
@@ -119,7 +124,7 @@ impl SndFile {
         let mut written: sf_count_t = 0;
         let ptr = buf.as_mut_ptr();
         unsafe {
-            written = sf_readf_float(self.ptr, ptr, frames as i64);
+            written = sf_readf_float(*self.ptr, ptr, frames as i64);
         }
         assert!(written >= 0);
         assert!((written as usize) < ::std::usize::MAX);
