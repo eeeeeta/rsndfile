@@ -1,12 +1,26 @@
 #![feature(unique)]
 extern crate libc;
 mod bindgen;
-use bindgen::{SF_INFO, SNDFILE, sf_count_t, sf_open, sf_readf_float, sf_close, sf_error, sf_error_number, sf_strerror, OpenMode, SfError};
-
+use bindgen::{SF_INFO,
+              SNDFILE,
+              sf_count_t,
+              sf_open,
+              sf_readf_float,
+              sf_close,
+              sf_error,
+              sf_error_number,
+              sf_strerror,
+              sf_seek,
+              OpenMode,
+              SfError};
+use bindgen::Seek as SfSeek;
 use std::ffi::{CString, NulError, CStr};
-use libc::{c_int, c_float};
+use libc::{c_int};
+use std::io::Seek;
+pub use std::io::SeekFrom;
 use std::ptr::Unique;
-
+use std::io::Result as IOResult;
+use std::io::Error as IOError;
 /// Information about a sound file.
 ///
 /// Currently a raw copy of the `SF_INFO` struct - better API tbc.
@@ -15,26 +29,23 @@ use std::ptr::Unique;
 #[derive(Debug, Clone, Copy)]
 pub struct SndFileInfo {
     /// The number of frames in the file
-    pub frames: sf_count_t,
+    pub frames: u64,
     /// The file's sample rate
-    pub samplerate: c_int,
+    pub samplerate: u32,
     /// The number of channels in the file
-    pub channels: c_int,
-    /// The file's format, which is currently gibberish
-    format: c_int,
-    /// I have no idea what this is
-    sections: c_int,
+    pub channels: u16,
     /// Whether the file is seekable, but I don't know what's true and what's false
     seekable: c_int
 }
 impl From<SF_INFO> for SndFileInfo {
     fn from(info: SF_INFO) -> Self {
+        assert!(info.frames as u64 <= ::std::u64::MAX && info.frames >= 0);
+        assert!(info.samplerate as u32 <= ::std::u32::MAX && info.samplerate >= 0);
+        assert!(info.channels as u16 <= ::std::u16::MAX && info.channels >= 0);
         SndFileInfo {
-            frames: info.frames,
-            samplerate: info.samplerate,
-            channels: info.channels,
-            format: info.format,
-            sections: info.sections,
+            frames: info.frames as u64,
+            samplerate: info.samplerate as u32,
+            channels: info.channels as u16,
             seekable: info.seekable
         }
     }
@@ -53,7 +64,7 @@ impl SndFile {
     /// Opens a sound file for reading.
     ///
     /// Takes a `path` to the sound file to open. Please note that opening for
-    /// writing is not supported yet.
+    /// writing is not supported yet, so this just opens for reading.
 
     pub fn open(path: &str) -> Result<Self, SndError> {
         let cstr = try!(CString::new(path));
@@ -103,32 +114,75 @@ impl SndFile {
         }
     }
 
-    /// Reads sound data from a sound file into a buffer of `libc::c_float`s.
+    /// Reads frames of sound data from a sound file into a buffer of f32s.
     ///
-    /// Returns either the amount of frames actually read (which may be less than
-    /// the `frames` requested if there are less frames available).
-    /// A `c_float` is usually `f32` on most platforms.
+    /// The buffer provided must be as long as (frames wanted * channels in file),
+    /// as it reads **interleaved** sound data. This looks something like:
+    ///
+    /// ```text
+    /// interleaved data:
+    /// buffer  [0.0, 0.2, 0.3, 0.4, 0.5, 0.8]
+    /// channel   1    2    1    2    1    2
+    /// index     0    0    1    1    2    2
+    ///
+    /// hence, non-interleaved channel 1:
+    /// [0.0, 0.3, 0.5]
+    /// non-interleaved channel 2:
+    /// [0.2, 0.4, 0.8]
+    /// ```
+    ///
+    /// Returns the number of interleaved frames read into the buffer. *Note:*
+    /// This number may be less than what you expected! This can be caused by:
+    ///
+    /// - You supplying a buffer that doesn't divide evenly (a buf of length 3 cannot take
+    ///   2 frames of interleaved data, only 1, so buf[2] will not be written to)
+    /// - You reaching the end of the file.
+    /// - Solar flares/extraterrestrial activity.
     ///
     /// # Panics
     ///
-    /// Panics if the amount of frames read exceeds `usize::MAX` or is less than 0.
+    /// Panics if the amount of frames read exceeds `u64::MAX` or is less than 0.
 
-    pub fn into_slice_float(&mut self, buf: &mut [c_float], frames: usize) -> Result<usize, SndError> {
-        let units_reqd = self.info.channels as usize * frames;
-        if buf.len() < units_reqd {
-            return Err(SndError {
-                err: SfError::SF_ERR_UNLISTED as c_int,
-                expl: "Binding: Buffer provided not big enough".to_string()
-            });
-        }
-        let mut written: sf_count_t = 0;
+    pub fn read_into_fslice(&mut self, buf: &mut [f32]) -> u64 {
+        let written: sf_count_t;
         let ptr = buf.as_mut_ptr();
         unsafe {
-            written = sf_readf_float(*self.ptr, ptr, frames as i64);
+            written = sf_readf_float(*self.ptr, ptr, buf.len() as i64 / self.info.channels as i64);
         }
-        assert!(written >= 0);
-        assert!((written as usize) < ::std::usize::MAX);
-        Ok(written as usize)
+        assert!(written >= 0, "rsndfile read_into_fslice: negative frames written");
+        assert!((written as u64) < ::std::u64::MAX, "rsndfile read_into_fslice: written >= u64 MAX");
+        written as u64
+    }
+
+}
+impl Seek for SndFile {
+    fn seek(&mut self, pos: SeekFrom) -> IOResult<u64> {
+        let frames: sf_count_t;
+        let whence: c_int;
+        match pos {
+            SeekFrom::Start(f) => {
+                whence = SfSeek::SF_SEEK_SET as c_int;
+                frames = f as i64;
+            },
+            SeekFrom::End(f) => {
+                whence = SfSeek::SF_SEEK_END as c_int;
+                frames = f;
+            },
+            SeekFrom::Current(f) => {
+                whence = SfSeek::SF_SEEK_CUR as c_int;
+                frames = f;
+            }
+        }
+        let new_pos: sf_count_t;
+        unsafe {
+            new_pos = sf_seek(*self.ptr, frames, whence);
+        }
+        if new_pos < 0 {
+            Err(IOError::new(::std::io::ErrorKind::Other, "libsndfile returned -1 while seeking"))
+        }
+        else {
+            Ok(new_pos as u64)
+        }
     }
 }
 

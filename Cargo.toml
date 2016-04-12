@@ -1,7 +1,7 @@
 [package]
 name = "rsndfile"
 description = "libsndfile bindings for Rust (αlpha)"
-version = "0.0.2"
+version = "0.1.0"
 repository = "https://github.com/eeeeeta/rsndfile"
 readme = "README.md"
 license = "Unlicense"

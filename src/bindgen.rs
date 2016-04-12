@@ -435,7 +435,7 @@ impl ::std::default::Default for Struct_SF_VIRTUAL_IO {
 pub type SF_VIRTUAL_IO = Struct_SF_VIRTUAL_IO;
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub enum FileFormat7 { SF_SEEK_SET = 0, SF_SEEK_CUR = 1, SF_SEEK_END = 2, }
+pub enum Seek { SF_SEEK_SET = 0, SF_SEEK_CUR = 1, SF_SEEK_END = 2, }
 #[repr(C)]
 #[derive(Copy)]
 pub struct Struct_SF_CHUNK_INFO {
